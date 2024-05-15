@@ -1,29 +1,17 @@
 package com.example.clientserver;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
-import java.io.BufferedReader;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.PrintWriter;
-import java.math.BigInteger;
-import java.net.Socket;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import java.io.*;
+import java.math.*;
+import java.net.*;
+import java.nio.file.*;
+import java.security.*;
 import java.util.Scanner;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class Client {
-    private DataOutputStream dataOutputStream = null;
-    private DataInputStream dataInputStream = null;
+    private static DataOutputStream dataToServer = null;
+    private static DataInputStream dataFromServer = null;
 
     public static String hashFile(String filePath) throws NoSuchAlgorithmException, IOException {
         byte[] fileToBytes = Files.readAllBytes(Paths.get(filePath));
@@ -36,9 +24,9 @@ public class Client {
     public static void showCommandMenu() {
         System.out.println("---------------------");
         System.out.println("LIST");
-        System.out.println("PUT <file_name>");
-        System.out.println("GET <file_name>");
-        System.out.println("<EXIT>");
+        System.out.println("PUT file_name");
+        System.out.println("GET file_name");
+        System.out.println("EXIT");
         System.out.println("---------------------");
     }
 
@@ -60,9 +48,12 @@ public class Client {
                 break;
             case ("GET"):
                 if (fileName == null) {
-                    throw new IllegalArgumentException("GET command requires a file name");
+                    throw new IllegalArgumentException("GET command requires a valid file name");
                 }
                 instruction = new Instruction(command, fileName);
+                break;
+            case ("EXIT"):
+                instruction = new Instruction(command);
                 break;
             default:
                 throw new IllegalArgumentException("Invalid command");
@@ -71,27 +62,41 @@ public class Client {
         return instruction;
     }
 
-    public static void sendFile(String path)
-            throws Exception {
+    public static void sendFile(String path) throws Exception {
         int bytes = 0;
-        // Open the File where he located in your pc
+
         File file = new File(path);
         FileInputStream fileInputStream = new FileInputStream(file);
 
         // Here we send the File to Server
-        // dataOutputStream.writeLong(file.length());
+        dataToServer.writeLong(file.length());
         // Here we break file into chunks
-        byte[] buffer = new byte[4 * 1024];
+        byte[] buffer = new byte[4096];
         while ((bytes = fileInputStream.read(buffer)) != -1) {
             // Send the file to Server Socket
-            // dataOutputStream.write(buffer, 0, bytes);
-            // dataOutputStream.flush();
+            dataToServer.write(buffer, 0, bytes);
+            dataToServer.flush();
         }
-        // close the file here
         fileInputStream.close();
+
     }
 
-    public static void readFile(String fileName) {
+    public static void readFile(String filePath) throws IOException {
+        File file = new File(filePath);
+        FileOutputStream fileOutputStream = new FileOutputStream(file);
+
+        long fileSize = dataFromServer.readLong();
+        byte[] buffer = new byte[4096];
+        int bytesRead;
+
+        while (fileSize > 0
+                && (bytesRead = dataFromServer.read(buffer, 0, (int) Math.min(buffer.length, fileSize))) != -1) {
+            fileOutputStream.write(buffer, 0, bytesRead);
+            fileSize -= bytesRead;
+        }
+
+        fileOutputStream.flush();
+        fileOutputStream.close();
 
     }
 
@@ -101,43 +106,27 @@ public class Client {
         Instruction instruction = new Instruction();
 
         Socket socket = new Socket("127.0.0.1", 6777);
-        File file = null;
         String filePath = null;
-        PrintWriter out; // Send instruction
-        BufferedReader in; // Read Message
-        DataOutputStream dataOutputStream; // Read file
-        DataInputStream dataInputStream; // Send file
+
+        dataToServer = new DataOutputStream(socket.getOutputStream());
+        dataFromServer = new DataInputStream(socket.getInputStream());
 
         boolean isValid = true;
         System.out.println("Welcome, please choose a command: ");
         while (true) {
             try {
                 showCommandMenu();
-                String command = input.nextLine();
-
-                int startIndex = command.indexOf("<");
-                int endIndex = command.indexOf(">");
-
-                filePath = "src/main/java/com/example/clientserver/files/client/";
-                String realCommand, fileName;
-
-                if (startIndex != -1) {
-                    realCommand = command.substring(0, startIndex).toUpperCase();
-                    fileName = command.substring(startIndex + 1, endIndex);
-                } else {
-                    realCommand = command.toUpperCase();
-                    fileName = null;
+                String inputString = input.nextLine();
+                String[] words = inputString.split("\\s+");
+                String command = words[0].toUpperCase();
+                String fileName = null;
+                if (words.length > 1) {
+                    fileName = words[1];
                 }
 
-                if (realCommand.equals("<EXIT>")) {
-                    System.out.println("Exiting...");
-                    break;
-                }
+                filePath = "src/main/java/com/example/clientserver/files/client/" + fileName;
 
-                filePath += fileName;
-                file = new File(filePath);
-
-                instruction = createInstruction(realCommand, fileName, filePath);
+                instruction = createInstruction(command, fileName, filePath);
 
             } catch (IllegalArgumentException e) {
                 e.getMessage();
@@ -145,7 +134,6 @@ public class Client {
             }
 
             catch (Exception e) {
-
                 System.out.println("Error: An unexpected error occurred");
                 isValid = false;
             }
@@ -156,27 +144,47 @@ public class Client {
             }
 
             String payload = objectMapper.writeValueAsString(instruction);
+            dataToServer.writeUTF(payload);
 
-            out = new PrintWriter(socket.getOutputStream(), true);
-            out.print(payload);
-            out.flush();
+            if (instruction.getCommand().equals("EXIT")) {
+                System.out.println("Exiting...");
+                break;
+            }
 
             if (instruction.getCommand().equals("PUT")) {
                 sendFile(filePath);
             }
 
+            ObjectMapper mapper = new ObjectMapper();
+
             switch (instruction.getCommand()) {
                 case ("LIST"):
-                    // Wait and show an arraylist
+                    String jsonListOfFiles = dataFromServer.readUTF();
+                    String[] listOfFiles = mapper.readValue(jsonListOfFiles, String[].class);
+                    System.out.println("List of available files:");
+                    for (String fileName : listOfFiles) {
+                        System.out.println(fileName);
+                    }
                     break;
                 case ("PUT"):
-                    // Wait for confirmation
+                    String jsonMessageConfirmation = dataFromServer.readUTF();
+                    Message message = mapper.readValue(jsonMessageConfirmation, Message.class);
+
+                    while (message.getStatus().equals("fail")) {
+                        sendFile(filePath);
+                        jsonMessageConfirmation = dataFromServer.readUTF();
+                        message = mapper.readValue(jsonMessageConfirmation, Message.class);
+                    }
+
                     break;
                 case ("GET"):
-                    // Receive message and calculate hash value
+                    // TO DO
+
                     break;
             }
         }
+        input.close();
         socket.close();
+
     }
 }

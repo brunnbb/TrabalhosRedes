@@ -9,27 +9,29 @@ import java.io.IOException;
 
 public class Sender extends Thread {
     private String group;
-    private int srcPort;
-    private int dstPort;
+    private int port;
 
-    public Sender(String group, int srcPort, int dstPort) {
+    public Sender(String group, int port) {
         this.group = group;
-        this.srcPort = srcPort;
-        this.dstPort = dstPort;
+        this.port = port;
     }
 
+    @SuppressWarnings("deprecation")
     @Override
     public void run() {
 
         try {
-            MulticastSocket socket = new MulticastSocket(srcPort);
+            MulticastSocket socket = new MulticastSocket(port);
+            socket.joinGroup(InetAddress.getByName(group));
+
             ObjectMapper objectMapper = new ObjectMapper();
             Scanner input = new Scanner(System.in);
             String text;
 
             System.out.print("Hello, please choose your username: ");
             String username = input.nextLine();
-            System.out.println("You can start typing \n");
+            System.out.println("You can start typing");
+            System.out.println("------------------------------------------------------------------");
 
             while (true) {
 
@@ -37,6 +39,7 @@ public class Sender extends Thread {
 
                 if ("<exit>".equals(text)) {
                     break;
+
                 }
 
                 String date = LocalDate.now().format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
@@ -46,13 +49,14 @@ public class Sender extends Thread {
 
                 byte[] msg = payload.getBytes();
 
-                DatagramPacket packet = new DatagramPacket(msg, msg.length, InetAddress.getByName(group), dstPort);
+                DatagramPacket packet = new DatagramPacket(msg, msg.length, InetAddress.getByName(group), port);
                 socket.send(packet);
 
             }
 
             System.out.println("Exiting....");
             input.close();
+            socket.leaveGroup(InetAddress.getByName(group));
             socket.close();
 
         } catch (IOException e) {

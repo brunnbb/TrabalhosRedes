@@ -5,6 +5,10 @@ public class Message {
     private String operation;
     private String status;
 
+    public Message() {
+
+    }
+
     public Message(String file, String operation, String status) {
         this.file = file;
         this.operation = operation;

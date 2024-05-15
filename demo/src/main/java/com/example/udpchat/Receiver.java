@@ -6,19 +6,26 @@ import java.io.IOException;
 
 public class Receiver extends Thread {
     private String group;
-    private int srcPort;
+    private int port;
+    private boolean isRunning;
 
-    public Receiver(String group, int srcPort) {
+    public Receiver(String group, int port) {
         this.group = group;
-        this.srcPort = srcPort;
+        this.port = port;
+        this.isRunning = true;
+    }
+
+    public void changeRunStatus() {
+        isRunning = false;
     }
 
     @SuppressWarnings("deprecation")
     @Override
     public void run() {
         try {
-            MulticastSocket socket = new MulticastSocket(srcPort);
+            MulticastSocket socket = new MulticastSocket(port);
             socket.joinGroup(InetAddress.getByName(group));
+
             ObjectMapper objectMapper = new ObjectMapper();
             String data, time, date, username, txt;
 
@@ -26,11 +33,14 @@ public class Receiver extends Thread {
                 byte[] buffer = new byte[1024];
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
 
+                socket.setSoTimeout(1000);
                 try {
                     socket.receive(packet);
-                } catch (SocketException e) {
-
-                    break;
+                } catch (SocketTimeoutException e) {
+                    if (!isRunning) {
+                        break;
+                    }
+                    continue;
                 }
 
                 data = new String(packet.getData());
@@ -48,7 +58,6 @@ public class Receiver extends Thread {
             socket.close();
 
         } catch (IOException e) {
-
             e.printStackTrace();
         }
     }
